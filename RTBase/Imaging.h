@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include "Core.h"
 #define STB_IMAGE_IMPLEMENTATION
@@ -166,7 +166,18 @@ public:
 	}
 	void tonemap(int x, int y, unsigned char& r, unsigned char& g, unsigned char& b, float exposure = 1.0f)
 	{
-		// Return a tonemapped pixel at coordinates x, y
+		//get HDR color
+		Colour hdrColor = film[y * width + x] * exposure / (float)SPP;
+
+		// (sRGB gamma = 2.2)
+		hdrColor.r = powf(hdrColor.r, 1.0f / 2.2f);
+		hdrColor.g = powf(hdrColor.g, 1.0f / 2.2f);
+		hdrColor.b = powf(hdrColor.b, 1.0f / 2.2f);
+
+		// reflect 0-255
+		r = (std::min(255.0f, std::max(0.0f, hdrColor.r * 255.0f)));
+		g = (std::min(255.0f, std::max(0.0f, hdrColor.g * 255.0f)));
+		b = (std::min(255.0f, std::max(0.0f, hdrColor.b * 255.0f)));
 	}
 	// Do not change any code below this line
 	void init(int _width, int _height, ImageFilter* _filter)
