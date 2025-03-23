@@ -10,23 +10,35 @@
 class Camera
 {
 public:
+	Matrix projectionMatrix;
 	Matrix inverseProjectionMatrix;
 	Matrix camera;
+	Matrix cameraToView;
 	float width = 0;
 	float height = 0;
 	Vec3 origin;
+	Vec3 viewDirection;
+	float Afilm;
 	void init(Matrix ProjectionMatrix, int screenwidth, int screenheight)
 	{
+		projectionMatrix = ProjectionMatrix;
 		inverseProjectionMatrix = ProjectionMatrix.invert();
 		width = (float)screenwidth;
 		height = (float)screenheight;
+		float Wlens = (2.0f / ProjectionMatrix.a[1][1]);
+		float aspect = ProjectionMatrix.a[0][0] / ProjectionMatrix.a[1][1];
+		float Hlens = Wlens * aspect;
+		Afilm = Wlens * Hlens;
 	}
 	void updateView(Matrix V)
 	{
 		camera = V;
+		cameraToView = V.invert();
 		origin = camera.mulPoint(Vec3(0, 0, 0));
+		viewDirection = inverseProjectionMatrix.mulPointAndPerspectiveDivide(Vec3(0, 0, 1));
+		viewDirection = camera.mulVec(viewDirection);
+		viewDirection = viewDirection.normalize();
 	}
-
 	// Add code here
 	Ray generateRay(float x, float y)
 	{
@@ -35,10 +47,26 @@ public:
 		xprime = (xprime * 2.0f) - 1.0f;
 		yprime = (yprime * 2.0f) - 1.0f;
 		Vec3 dir(xprime, yprime, 1.0f);
-		dir = inverseProjectionMatrix.mulPoint(dir);
+		dir = inverseProjectionMatrix.mulPointAndPerspectiveDivide(dir);
 		dir = camera.mulVec(dir);
 		dir = dir.normalize();
 		return Ray(origin, dir);
+	}
+
+	bool projectOntoCamera(const Vec3& p, float& x, float& y)
+	{
+		Vec3 pview = cameraToView.mulPoint(p);
+		Vec3 pproj = projectionMatrix.mulPointAndPerspectiveDivide(pview);
+		x = (pproj.x + 1.0f) * 0.5f;
+		y = (pproj.y + 1.0f) * 0.5f;
+		if (x < 0 || x > 1.0f || y < 0 || y > 1.0f)
+		{
+			return false;
+		}
+		x = x * width;
+		y = 1.0f - y;
+		y = y * height;
+		return true;
 	}
 };
 
@@ -55,7 +83,7 @@ public:
 	void build()
 	{
 		// Add BVH building code here
-		
+
 		// Do not touch the code below this line!
 		// Build light list
 		for (int i = 0; i < triangles.size(); i++)
@@ -96,6 +124,8 @@ public:
 	{
 		return NULL;
 	}
+
+
 	// Do not modify any code below this line
 	void init(std::vector<Triangle> meshTriangles, std::vector<BSDF*> meshMaterials, Light* _background)
 	{
@@ -116,6 +146,7 @@ public:
 			lights.push_back(background);
 		}
 	}
+	
 	bool visible(const Vec3& p1, const Vec3& p2)
 	{
 		Ray ray;
@@ -123,8 +154,24 @@ public:
 		float maxT = dir.length() - (2.0f * EPSILON);
 		dir = dir.normalize();
 		ray.init(p1 + (dir * EPSILON), dir);
-		return bvh->traverseVisible(ray, triangles, maxT);
+
+		// return bvh->traverseVisible(ray, triangles, maxT);
+		for (int i = 0; i < triangles.size(); i++)
+		{
+			float t;
+			float u;
+			float v;
+			if (triangles[i].rayIntersect(ray, t, u, v))
+			{
+				if (t < maxT)
+				{
+					return false;
+				}
+			}
+		}
+		return true;
 	}
+
 	Colour emit(Triangle* light, ShadingData shadingData, Vec3 wi)
 	{
 		return materials[light->materialIndex]->emit(shadingData, wi);
@@ -152,7 +199,8 @@ public:
 			}
 			shadingData.frame.fromVector(shadingData.sNormal);
 			shadingData.t = intersection.t;
-		} else
+		}
+		else
 		{
 			shadingData.wo = -ray.dir;
 			shadingData.t = intersection.t;

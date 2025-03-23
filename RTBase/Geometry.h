@@ -152,11 +152,26 @@ public:
 		interpolatedU = vertices[0].u * alpha + vertices[1].u * beta + vertices[2].u * gamma;
 		interpolatedV = vertices[0].v * alpha + vertices[1].v * beta + vertices[2].v * gamma;
 	}
+
 	// Add code here
 	Vec3 sample(Sampler* sampler, float& pdf)
 	{
-		return Vec3(0, 0, 0);
+		float r1 = sampler->next();
+		float r2 = sampler->next();
+
+		float sqtr1 = sqrtf(r1);
+		float alpha = 1.0f - sqtr1;
+		float beta = r2 * sqtr1;
+
+
+		Vec3 x = vertices[1].p - vertices[0].p;
+		Vec3 y = vertices[2].p - vertices[0].p;
+		float area = 0.5f * Cross(x, y).length(); // 计算三角形面积
+		pdf = 1.0f / area; // 均匀分布的 PDF = 1 / 三角形面积
+
+		return (vertices[0].p * alpha) + (vertices[1].p * beta) + (vertices[2].p * (1.0f - (alpha + beta))); //Sample barycentric coordinates
 	}
+
 	Vec3 gNormal()
 	{
 		return (n * (Dot(vertices[0].normal, n) > 0 ? 1.0f : -1.0f));
