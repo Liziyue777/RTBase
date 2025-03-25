@@ -1,4 +1,4 @@
-
+﻿
 
 #include "GEMLoader.h"
 #include "Renderer.h"
@@ -65,6 +65,14 @@ int main(int argc, char *argv[])
 	canvas.create((unsigned int)scene->camera.width, (unsigned int)scene->camera.height, "Tracer", 1.0f);
 	RayTracer rt;
 	rt.init(scene, &canvas);
+
+	//std::cout << "[Debug] Background light power: " << scene->background->totalIntegratedPower() << std::endl;
+	//std::cout << "[Debug] Light count in scene: " << scene->lights.size() << std::endl;
+	//for (int i = 0; i < scene->lights.size(); ++i) {
+	//	std::cout << "  Light[" << i << "] isArea: " << scene->lights[i]->isArea()
+	//		<< ", total power: " << scene->lights[i]->totalIntegratedPower() << std::endl;
+	//}
+
 	bool running = true;
 	GamesEngineeringBase::Timer timer;
 	while (running)

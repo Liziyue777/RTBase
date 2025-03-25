@@ -12,6 +12,7 @@
 #pragma warning( disable : 4244)
 
 #define SQ(x) (x * x)
+#define MAX_DEPTH 15
 
 class Colour
 {
@@ -145,6 +146,23 @@ public:
 	{
 		return Vec3(x * v.x, y * v.y, z * v.z);
 	}
+
+	// for light calculate
+	Vec3& operator*=(float scalar)
+	{
+		x *= scalar;
+		y *= scalar;
+		z *= scalar;
+		return *this;
+	}
+	Vec3& operator+=(const Vec3& other)
+	{
+		x += other.x;
+		y += other.y;
+		z += other.z;
+		return *this;
+	}
+
 	Vec3 perspectiveDivide() const
 	{
 		return Vec3(x / w, y / w, z / w, 1.0f / w);
@@ -170,6 +188,18 @@ public:
 	Vec3 cross(Vec3 v) const
 	{
 		return Vec3((y * v.z) - (z * v.y), (z * v.x) - (x * v.z), (x * v.y) - (y * v.x));
+	}
+	float& operator[](int i)
+	{
+		if (i == 0) return x;
+		if (i == 1) return y;
+		return z;
+	}
+	const float& operator[](int i) const
+	{
+		if (i == 0) return x;
+		if (i == 1) return y;
+		return z;
 	}
 };
 

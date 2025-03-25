@@ -131,24 +131,86 @@ public:
 class ImageFilter
 {
 public:
-	virtual float filter(const float x, const float y) const = 0;
+	virtual float filter(float x, float y) const = 0;
 	virtual int size() const = 0;
 };
 
 class BoxFilter : public ImageFilter
 {
 public:
-	float filter(float x, float y) const
+	float filter(float x, float y) const override
 	{
-		if (fabsf(x) < 0.5f && fabs(y) < 0.5f)
-		{
-			return 1.0f;
-		}
-		return 0;
+		return (fabsf(x) <= 0.5f && fabsf(y) <= 0.5f) ? 1.0f : 0.0f;
 	}
-	int size() const
+	int size() const override { return 0; }
+};
+
+
+
+// New work:
+// GaussianFilter
+float Gaussians(float alpha, float x)
+{
+	return expf(-alpha * x * x);
+}
+
+class GaussianFilter : public ImageFilter
+{
+public:
+	float radius, alpha;
+	GaussianFilter(float r, float a) : radius(r), alpha(a) {}
+
+	float filter(float x, float y) const override
 	{
-		return 0;
+		if (fabsf(x) > 0.5f || fabsf(y) > 0.5f) return 0.0f;
+		return Gaussians(alpha, x) * Gaussians(alpha, y);
+	}
+
+	int size() const override
+	{
+		return (int)ceilf(radius) * 2;
+	}
+};
+
+//Mitchell-Netravali filter
+class MitchellNetravaliFilter : public ImageFilter
+{
+private:
+	float B, C;
+
+public:
+	MitchellNetravaliFilter(float _B = 1.0f / 3.0f, float _C = 1.0f / 3.0f)
+	{
+		B = _B;
+		C = _C;
+	}
+
+	int size() const override
+	{
+		return 2; // Filter support: [-2, 2]
+	}
+
+	float mitchell1D(float x) const
+	{
+		x = fabsf(x);
+		if (x < 1.0f)
+		{
+			return ((12 - 9 * B - 6 * C) * x * x * x +(-18 + 12 * B + 6 * C) * x * x +(6 - 2 * B)) / 6.0f;
+		}
+		else if (x < 2.0f)
+		{
+			return ((-B - 6 * C) * x * x * x +(6 * B + 30 * C) * x * x +(-12 * B - 48 * C) * x +(8 * B + 24 * C)) / 6.0f;
+		}
+		else
+		{
+			return 0.0f;
+		}
+	}
+
+	// 2D  separable filter
+	float filter(float x, float y) const override
+	{
+		return mitchell1D(x) * mitchell1D(y);
 	}
 };
 
@@ -160,10 +222,39 @@ public:
 	unsigned int height;
 	int SPP;
 	ImageFilter* filter;
+
 	void splat(const float x, const float y, const Colour& L)
 	{
-		// Code to splat a smaple with colour L into the image plane using an ImageFilter
+		float filterWeights[25];    // // Storage to cache weights 
+		unsigned int indices[25];   // // Store indices to minimize computations 
+		unsigned int used = 0;
+		float total = 0.0f;
+		int size = filter->size(); // radius
+
+		for (int i = -size; i <= size; ++i)
+		{
+			for (int j = -size; j <= size; ++j)
+			{
+				int px = (int)x + j;
+				int py = (int)y + i;
+				if (px >= 0 && px < (int)width && py >= 0 && py < (int)height)
+				{
+					unsigned int index = py * width + px;
+					float weight = filter->filter((float)j, (float)i);
+					filterWeights[used] = weight;
+					indices[used] = index;
+					total += weight;
+					used++;
+				}
+			}
+		}
+
+		for (unsigned int i = 0; i < used; ++i)
+		{
+			film[indices[i]] = film[indices[i]] + (L * (filterWeights[i] / total));
+		}
 	}
+
 	void tonemap(int x, int y, unsigned char& r, unsigned char& g, unsigned char& b, float exposure = 1.0f)
 	{
 		//get HDR color
@@ -179,6 +270,8 @@ public:
 		g = (std::min(255.0f, std::max(0.0f, hdrColor.g * 255.0f)));
 		b = (std::min(255.0f, std::max(0.0f, hdrColor.b * 255.0f)));
 	}
+
+
 	// Do not change any code below this line
 	void init(int _width, int _height, ImageFilter* _filter)
 	{

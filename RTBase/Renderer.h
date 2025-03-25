@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include "Core.h"
 #include "Sampling.h"
@@ -10,6 +10,7 @@
 #include "GamesEngineeringBase.h"
 #include <thread>
 #include <functional>
+
 
 class RayTracer
 {
@@ -25,7 +26,7 @@ public:
 		scene = _scene;
 		canvas = _canvas;
 		film = new Film();
-		film->init((unsigned int)scene->camera.width, (unsigned int)scene->camera.height, new BoxFilter());
+		film->init((unsigned int)scene->camera.width, (unsigned int)scene->camera.height, new GaussianFilter(1, 2));
 		SYSTEM_INFO sysInfo;
 		GetSystemInfo(&sysInfo);
 		numProcs = sysInfo.dwNumberOfProcessors;
@@ -37,6 +38,7 @@ public:
 	{
 		film->clear();
 	}
+
 	Colour computeDirect(ShadingData shadingData, Sampler* sampler)
 	{
 		if (shadingData.bsdf->isPureSpecular() == true)
@@ -84,7 +86,8 @@ public:
 		}
 		return Colour(0.0f, 0.0f, 0.0f);
 	}
-	Colour pathTrace(Ray& r, Colour& pathThroughput, int depth, Sampler* sampler, bool canHitLight = true)
+
+	Colour pathTrace(Ray& r, Colour pathThroughput, int depth, Sampler* sampler, bool canHitLight = true)
 	{
 		IntersectionData intersection = scene->traverse(r);
 		ShadingData shadingData = scene->calculateShadingData(intersection, r);
@@ -102,7 +105,7 @@ public:
 				}
 			}
 			Colour direct = pathThroughput * computeDirect(shadingData, sampler);
-			if (depth > MAX_DEPTH)
+			if (depth > MAX_DEPTH) // define in Core.h
 			{
 				return direct;
 			}
@@ -115,14 +118,21 @@ public:
 			{
 				return direct;
 			}
+			
 			Colour bsdf;
+			//  Replace cosine sampling in renderer
+			Colour indirect;
 			float pdf;
-			Vec3 wi = SamplingDistributions::cosineSampleHemisphere(sampler->next(), sampler->next());
-			pdf = SamplingDistributions::cosineHemispherePDF(wi);
-			wi = shadingData.frame.toWorld(wi);
-			bsdf = shadingData.bsdf->evaluate(shadingData, wi);
-			pathThroughput = pathThroughput * bsdf * fabsf(Dot(wi, shadingData.sNormal)) / pdf;
-			r.init(shadingData.x + (wi * EPSILON), wi);
+			Vec3 wi = shadingData.bsdf->sample(shadingData, sampler, indirect, pdf);
+			if (pdf > 0.0f)
+			{
+				pathThroughput = pathThroughput * indirect * fabsf(Dot(wi, shadingData.sNormal)) / pdf;
+				r.init(shadingData.x + (wi * EPSILON), wi);
+			}
+			else
+			{
+				return direct;
+			}
 			return (direct + pathTrace(r, pathThroughput, depth + 1, sampler, shadingData.bsdf->isPureSpecular()));
 		}
 		return scene->background->evaluate(shadingData, r.dir);
@@ -153,6 +163,7 @@ public:
 				return shadingData.bsdf->emit(shadingData, shadingData.wo);
 			}
 			return shadingData.bsdf->evaluate(shadingData, Vec3(0, 1, 0));
+			//return computeDirect(shadingData, samplers);
 		}
 		return scene->background->evaluate(shadingData, r.dir);
 	}
@@ -166,26 +177,109 @@ public:
 		}
 		return Colour(0.0f, 0.0f, 0.0f);
 	}
-	void render()
-	{
+
+	//multiple threads and Tile based rendering
+	void render() {
 		film->incrementSPP();
-		for (unsigned int y = 0; y < film->height; y++)
-		{
-			for (unsigned int x = 0; x < film->width; x++)
-			{
-				float px = x + 0.5f;
-				float py = y + 0.5f;
-				Ray ray = scene->camera.generateRay(px, py);
-				Colour col = viewNormals(ray);
-				//Colour col = albedo(ray);
-				film->splat(px, py, col);
-				unsigned char r = (unsigned char)(col.r * 255);
-				unsigned char g = (unsigned char)(col.g * 255);
-				unsigned char b = (unsigned char)(col.b * 255);
-				canvas->draw(x, y, r, g, b);
+
+		const int tileSize = 32;  // Tile 32X32
+		const int tilesX = (film->width + tileSize - 1) / tileSize;// render num for X
+		const int tilesY = (film->height + tileSize - 1) / tileSize;  //render num for Y
+		const int totalTiles = tilesX * tilesY; // all render tiles to map the image
+
+		std::atomic<int> tileCounter(0);  // share tile index job queue
+
+		//Previous multi-threaded architecture in Kurt class
+		auto worker = [&](int threadID) {
+			Sampler* sampler = &samplers[threadID];
+			while (true) {
+				int tileIndex = tileCounter.fetch_add(1); 
+				if (tileIndex >= totalTiles) break;
+
+				int tileX = tileIndex % tilesX;
+				int tileY = tileIndex / tilesX;
+
+				int startX = tileX * tileSize;
+				int startY = tileY * tileSize;
+				int endX;
+
+				if (startX + tileSize < (int)film->width)
+				{
+					endX = startX + tileSize;
+				}
+				else
+				{
+					endX = (int)film->width;
+				}
+
+				int endY;
+				if (startY + tileSize < (int)film->height)
+				{
+					endY = startY + tileSize;
+				}
+				else
+				{
+					endY = (int)film->height;
+				}
+
+				for (int y = startY; y < endY; y++) {
+					for (int x = startX; x < endX; x++) {
+						float px = x + 0.5f;
+						float py = y + 0.5f;
+						Ray ray = scene->camera.generateRay(px, py);
+
+						Colour col = pathTrace(ray, Colour(1.f, 1.f, 1.f), 13, sampler);
+
+						film->splat(px, py, col);
+
+						unsigned char r = (unsigned char)(col.r * 255);
+						unsigned char g = (unsigned char)(col.g * 255);
+						unsigned char b = (unsigned char)(col.b * 255);
+						film->tonemap(x, y, r, g, b);// very improtant!! translate HDR to LDR
+						canvas->draw(x, y, r, g, b);
+					}
+				}
 			}
+			};
+
+		// using threadPool reduce resource using and speed up.
+		std::vector<std::thread> threadPool;
+		for (int i = 0; i < numProcs; ++i) {
+			threadPool.emplace_back(worker, i);
+		}
+
+		// wait all threads over
+		for (auto& t : threadPool) {
+			t.join();
 		}
 	}
+
+	//void render()
+	//{
+	//	film->incrementSPP();
+	//	for (unsigned int y = 0; y < film->height; y++)
+	//	{
+	//		for (unsigned int x = 0; x < film->width; x++)
+	//		{
+	//			float px = x + 0.5f;
+	//			float py = y + 0.5f;
+	//			Ray ray = scene->camera.generateRay(px, py);
+	//
+	//			//Colour col = viewNormals(ray);
+	//			//Colour col = albedo(ray);
+
+	//			Colour pathThroughput = Colour(1, 1, 1);
+	//			Colour col = pathTrace(ray, pathThroughput, 0, &samplers[0]);
+
+	//			film->splat(px, py, col);
+	//			unsigned char r = (unsigned char)(col.r * 255);
+	//			unsigned char g = (unsigned char)(col.g * 255);
+	//			unsigned char b = (unsigned char)(col.b * 255);
+	//			canvas->draw(x, y, r, g, b);
+	//		}
+	//	}
+	//}
+
 	int getSPP()
 	{
 		return film->SPP;

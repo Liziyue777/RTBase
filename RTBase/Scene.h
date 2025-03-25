@@ -82,8 +82,9 @@ public:
 	AABB bounds;
 	void build()
 	{
-		// Add BVH building code here
-
+		// Add BVH building code here (done)
+		//bvh = new BVHNode();
+		//bvh->build(triangles);
 		// Do not touch the code below this line!
 		// Build light list
 		for (int i = 0; i < triangles.size(); i++)
@@ -119,10 +120,15 @@ public:
 			}
 		}
 		return intersection;
+
+		//return bvh->traverse(ray, triangles);
 	}
+
 	Light* sampleLight(Sampler* sampler, float& pmf)
 	{
-		return NULL;
+		float r1 = sampler->next();
+		pmf = 1.0f / (float)lights.size();
+		return lights[std::min((int)(r1 * lights.size()), (int)(lights.size() - 1))];
 	}
 
 
@@ -155,7 +161,9 @@ public:
 		dir = dir.normalize();
 		ray.init(p1 + (dir * EPSILON), dir);
 
-		// return bvh->traverseVisible(ray, triangles, maxT);
+		//return bvh->traverseVisible(ray, triangles, maxT);
+		
+		// no bvh
 		for (int i = 0; i < triangles.size(); i++)
 		{
 			float t;

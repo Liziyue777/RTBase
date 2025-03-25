@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include "Core.h"
 #include "Geometry.h"
@@ -34,6 +34,7 @@ public:
 	Colour emission;
 	Vec3 sample(const ShadingData& shadingData, Sampler* sampler, Colour& emittedColour, float& pdf)
 	{
+		//! Area light!
 		emittedColour = emission;
 		return triangle->sample(sampler, pdf);
 	}
@@ -86,6 +87,7 @@ public:
 	}
 	Vec3 sample(const ShadingData& shadingData, Sampler* sampler, Colour& reflectedColour, float& pdf)
 	{
+		//!Environment light
 		Vec3 wi = SamplingDistributions::uniformSampleSphere(sampler->next(), sampler->next());
 		pdf = SamplingDistributions::uniformSpherePDF(wi);
 		reflectedColour = emission;
@@ -134,6 +136,7 @@ public:
 	EnvironmentMap(Texture* _env)
 	{
 		env = _env;
+
 	}
 	Vec3 sample(const ShadingData& shadingData, Sampler* sampler, Colour& reflectedColour, float& pdf)
 	{
