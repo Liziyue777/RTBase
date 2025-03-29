@@ -1,13 +1,8 @@
 ﻿#pragma once
-
+#define EPSILON 0.001f
 #include "Core.h"
 #include "Sampling.h"
 
-Vec3 operator*(const float& num, Vec3& vec) {
-	return Vec3(vec.x * num, vec.y * num, vec.z * num);
-}
-
-#include<algorithm>
 class Ray
 {
 public:
@@ -43,18 +38,26 @@ public:
 		n = _n;
 		d = _d;
 	}
-	// Check if ray intersect with plane
+	// Add code here
 	bool rayIntersect(Ray& r, float& t)
 	{
-		if (n.x * (r.o.x + t * r.dir.x) + n.y * (r.o.y + t * r.dir.y) + n.z * (r.o.z + t * r.dir.z) + d >= 0)
-		{
-			return true;
-		}
-		return false;
+		float denom = Dot(n, r.dir); // N·D
+
+		// If denom is approximately 0, then the light is parallel to the plane, with no intersection points.
+		if (fabs(denom) < EPSILON)
+			return false;
+
+		// t
+		t = -(Dot(n, r.o) + d) / denom;
+
+		// If the intersection is in the negative direction of the ray (t < 0), no intersection point
+		if (t < 0)
+			return false;
+
+		return true;
 	}
 };
 
-#define EPSILON 0.001f   // a small float
 
 class Triangle
 {
@@ -80,84 +83,66 @@ public:
 	}
 	Vec3 centre() const
 	{
-		// Get the centre of the triangle
 		return (vertices[0].p + vertices[1].p + vertices[2].p) / 3.0f;
 	}
-
-#if 0
+	// Add code here
 	bool rayIntersect(const Ray& r, float& t, float& u, float& v) const
 	{
-		// 两步走: 点在平面上, 点在三角形内部.
-		// calculate the distance between the ray origin and the plane
-		float t1 = (d - Dot(n, r.o)) / Dot(n, r.dir);
-		if (t1 < 0) {
-			return false;
-		}
-		// 知道t就可以计算交点
-		Vec3 ps = r.o + r.dir * t1; // 和平面的交点
-		Vec3 e3 = vertices[1].p - vertices[0].p;
+        // Möller-Trumbore
+		Vec3 E1 = vertices[1].p - vertices[0].p;
+		Vec3 E2 = vertices[2].p - vertices[0].p;
 
-		// 计算交点是否在三角形内部
-		Vec3 ee1 = ps - vertices[0].p;
-		Vec3 ee2 = ps - vertices[1].p;
-		Vec3 ee3 = ps - vertices[2].p;
+		//// (P = D × E2)
+		Vec3 P = r.dir.cross(E2);
 
-		Vec3 c1 = ee1.cross(e3);
-		Vec3 c2 = ee2.cross(e1);
-		Vec3 c3 = ee3.cross(e2);
+		//// determinant (det = E1 · P)
+		float det = Dot(E1, P);
 
-		if (Dot(c1, c2) > 0 && Dot(c1, c3) > 0)
-		{
-			return true;
-		}
+		//// parallel
+		if (fabs(det) < EPSILON) return false;
 
-		return true;
-	}
-#endif
+		float invDet = 1.0f / det; //store invdet = 1/det
 
-	bool rayIntersect1(const Ray& r, float& t, float& u, float& v) const
-	{
-		// 两步走: 点在平面上, 点在三角形内部.
-		// calculate the distance between the ray origin and the plane
-		float t1 = (d - Dot(n, r.o)) / Dot(n, r.dir);
-		if (t1 < 0) {
-			return false;
-		}
-		// 知道t就可以计算交点
-		Vec3 ps = r.o + r.dir * t1; // 和平面的交点
-		Vec3 e3 = vertices[1].p - vertices[0].p;
+		//// (T = O - V0)
+		Vec3 T = r.o - vertices[0].p;
 
-		// 计算交点是否在三角形内部
-		Vec3 ee1 = ps - vertices[0].p;
-		Vec3 ee2 = ps - vertices[1].p;
-		Vec3 ee3 = ps - vertices[2].p;
+		//(u = (P · T) * invDet)
+		u = Dot(P, T) * invDet;
 
-		Vec3 c1 = ee1.cross(e3);
-		Vec3 c2 = ee2.cross(e1);
-		Vec3 c3 = ee3.cross(e2);
+		//u 超出范围，返回 false
+		if (u < 0.0f || u > 1.0f) return false;
 
-		if (Dot(c1, c2) > 0 && Dot(c1, c3) > 0)
-		{
-			return true;
-		}
+		// (Q = T × E1)
+		Vec3 Q = T.cross(E1);
 
-		return true;
+		// coordinates(v = (D · Q) * invDet)
+		v = Dot(Q, r.dir) * invDet;
+
+		// v out of limit
+		if (v < 0.0f || (u + v) > 1.0f) return false;
+
+		// (t = (E2 · Q) * invDet)
+		t = Dot(Q, E2) * invDet;
+
+		// only t > 0, ray reach the triangle
+		return (t > EPSILON);
+
+		// Toms code
+		// 
+		//float denom = Dot(n, r.dir);
+		//if (denom == 0) { return false; }
+		//t = (d - Dot(n, r.o)) / denom;
+		//if (t < 0) { return false; }
+		//Vec3 p = r.at(t);
+		//float invArea = 1.0f / Dot(e1.cross(e2), n);
+		//u = Dot(e1.cross(p - vertices[1].p), n) * invArea;
+		//if (u < 0 || u > 1.0f) { return false; }
+		//v = Dot(e2.cross(p - vertices[2].p), n) * invArea;
+		//if (v < 0 || (u + v) > 1.0f) { return false; }
+		//return true;
 	}
 
-	bool rayIntersect(const Ray& r, float& t, float& u, float& v) const
-	{
-		float denom = Dot(n, r.dir);
-		if (denom == 0) { return false; }
-		t = (d - Dot(n, r.o)) / denom;
-		if (t < 0) { return false; }
-		Vec3 p = r.at(t);
-		float invArea = 1.0f / Dot(e1.cross(e2), n);
-		u = Dot(e1.cross(p - vertices[1].p), n) * invArea;
-		if (u < 0 || u > 1.0f) { return false; }
-		v = Dot(e2.cross(p - vertices[2].p), n) * invArea;
-		if (v < 0 || (u + v) > 1.0f) { return false; }
-		return true;
-	}
+
 
 	void interpolateAttributes(const float alpha, const float beta, const float gamma, Vec3& interpolatedNormal, float& interpolatedU, float& interpolatedV) const
 	{
@@ -166,21 +151,25 @@ public:
 		interpolatedU = vertices[0].u * alpha + vertices[1].u * beta + vertices[2].u * gamma;
 		interpolatedV = vertices[0].v * alpha + vertices[1].v * beta + vertices[2].v * gamma;
 	}
-	// Add code here
+
+	// Add code here (done)
 	Vec3 sample(Sampler* sampler, float& pdf)
 	{
-		// Use 2 random number to generate barycentric coordinates, and sample a point inside thrangle using it.
-		// pdf here is 1/ area, where area is given
 		float r1 = sampler->next();
 		float r2 = sampler->next();
-		// 求出重心坐标
-		float alpha = 1 - sqrt(r1);
-		float beta = r2 * sqrt(r1);
-		float gamma = 1 - alpha - beta;
-		pdf = 1 / area; // change pdf
-		return Vec3(alpha * vertices[0].p + beta * vertices[1].p + gamma * vertices[2].p);
-	}
 
+		float sqtr1 = sqrtf(r1);
+		float alpha = 1.0f - sqtr1;
+		float beta = r2 * sqtr1;
+
+
+		Vec3 x = vertices[1].p - vertices[0].p;
+		Vec3 y = vertices[2].p - vertices[0].p;
+		float area = 0.5f * Cross(x, y).length(); // area of triangle
+		pdf = 1.0f / area; // PDF of the evenly distributed area of the triangles
+
+		return (vertices[0].p * alpha) + (vertices[1].p * beta) + (vertices[2].p * (1.0f - (alpha + beta))); //Sample barycentric coordinates
+	}
 
 	Vec3 gNormal()
 	{
@@ -207,68 +196,44 @@ public:
 		max = Max(max, p);
 		min = Min(min, p);
 	}
-	// Add code here
+	// Add code here (done)
 	bool rayAABB(const Ray& r, float& t)
-	{
+	{    
+		//X-axis
+		float tmin_x = (min.x - r.o.x) * r.invDir.x;
+		float tmax_x = (max.x - r.o.x) * r.invDir.x;
+		if (tmin_x > tmax_x) std::swap(tmin_x, tmax_x);
 
-		float txmin = (min.x - r.o.x) / r.dir.x;
-		float txmax = (max.x - r.o.x) / r.dir.x;
-		if (r.dir.x < 0) std::swap(txmin, txmax);
+		//Y-axis
+		float tmin_y = (min.y - r.o.y) * r.invDir.y;
+		float tmax_y = (max.y - r.o.y) * r.invDir.y;
+		if (tmin_y > tmax_y) std::swap(tmin_y, tmax_y);
 
-		float tymin = (min.y - r.o.y) / r.dir.y;
-		float tymax = (max.y - r.o.y) / r.dir.y;
-		if (r.dir.y < 0) std::swap(tymin, tymax);
+		//Z-axis
+		float tmin_z = (min.z - r.o.z) * r.invDir.z;
+		float tmax_z = (max.z - r.o.z) * r.invDir.z;
+		if (tmin_z > tmax_z) std::swap(tmin_z, tmax_z);
 
-		float tzmin = (min.z - r.o.z) / r.dir.z;
-		float tzmax = (max.z - r.o.z) / r.dir.z;
-		if (r.dir.z < 0) std::swap(tzmin, tzmax);
+		float tmin = std::max({ tmin_x, tmin_y, tmin_z });
+		float tmax = std::min({ tmax_x, tmax_y, tmax_z });
 
-		float tenter = std::max((txmin, tymin), tzmin);
-		float texit = std::min((txmax, tymax), tzmax);
+		// If tmin > tmax, the ray misses the AABB; if tmax < 0,the intersection is before the starting point of the ray
+		if (tmin > tmax || tmax < 0) return false;
 
-		if (tenter <= texit && texit > 0) {
-			return true;
-		}
-
-		return false;
+	    t = tmin; // intersection t point,the ray intersects the AABB
+		return true;
 	}
-	// Test if AABB collides with ray
+	// Add code here
 	bool rayAABB(const Ray& r)
 	{
-		/*float txmin = (min.x - r.o.x) / r.dir.x;
-		float txmax = (max.x - r.o.x) / r.dir.x;*/
-
-		float txmin = (r.dir.x != 0) ? (min.x - r.o.x) / r.dir.x : (min.x >= r.o.x) ? FLT_MAX : -FLT_MAX;
-		float txmax = (r.dir.x != 0) ? (max.x - r.o.x) / r.dir.x : (max.x >= r.o.x) ? FLT_MAX : -FLT_MAX;
-
-		if (r.dir.x < 0) std::swap(txmin, txmax);
-
-		float tymin = (min.y - r.o.y) / r.dir.y;
-		float tymax = (max.y - r.o.y) / r.dir.y;
-		if (r.dir.y < 0) std::swap(tymin, tymax);
-
-		float tzmin = (min.z - r.o.z) / r.dir.z;
-		float tzmax = (max.z - r.o.z) / r.dir.z;
-		if (r.dir.z < 0) std::swap(tzmin, tzmax);
-
-		//float tenter = std::max((txmin, tymin), tzmin);
-		//float texit = std::min((txmax, tymax), tzmax);
-
-		float tenter = std::max({ txmin, tymin, tzmin });
-		float texit = std::min({ txmax, tymax, tzmax });
-
-		if (tenter <= texit && texit > 0) {
-			return true;
-		}
-
-		return false;
+		float t;
+		return rayAABB(r, t);
 	}
 
 	// Add code here
 	float area()
 	{
 		Vec3 size = max - min;
-
 		return ((size.x * size.y) + (size.y * size.z) + (size.x * size.z)) * 2.0f;
 	}
 };
@@ -283,18 +248,46 @@ public:
 		centre = _centre;
 		radius = _radius;
 	}
-	// Add code here
+	// Add code here (done)
 	bool rayIntersect(Ray& r, float& t)
 	{
-		return false;
+		// L = O - C
+		Vec3 L = r.o - centre;
+
+		// A, B, C
+		float A = Dot(r.dir, r.dir);  
+		float B = 2.0f * Dot(r.dir, L);
+		float C = Dot(L, L) - radius * radius;
+
+		// Δ = B^2 - 4AC
+		float delta = B * B - 4 * A * C;
+
+		// no intersection
+		if (delta < 0) return false;
+
+		// intersections t1 and t2
+		float sqrt_delta = sqrt(delta);
+		float t1 = (-B - sqrt_delta) / (2.0f * A);
+		float t2 = (-B + sqrt_delta) / (2.0f * A);
+
+		// choose t
+		if (t1 > 0) {
+			t = t1;
+			return true;
+		}
+		else if (t2 > 0) {
+			t = t2;
+			return true;
+		}
+
+		return false; 
 	}
 };
 
 struct IntersectionData
 {
-	unsigned int ID; // unique ID for intersection
-	float t; // ray parameter
-	// barycentric coordinate
+	unsigned int ID;
+	float t;
 	float alpha;
 	float beta;
 	float gamma;
@@ -311,116 +304,72 @@ public:
 	AABB bounds;
 	BVHNode* r;
 	BVHNode* l;
+	std::vector<int> triangleIndices;  // 只保存索引
 	// This can store an offset and number of triangles in a global triangle list for example
 	// But you can store this however you want!
-	unsigned int offset;
-	unsigned char num;
-	BVHNode()
+	// unsigned int offset;
+	// unsigned char num;
+	void build(const std::vector<Triangle>& triangles, const std::vector<int>& indices)
 	{
-		r = NULL;
-		l = NULL;
-	}
-	~BVHNode() {
-		delete l;
-		delete r;
-	}
-
-	const int MAX_TRIANGLE = 4;
-
-	// Note there are several options for how to implement the build method. Update this as required
-	void build(std::vector<Triangle>& inputTriangles)
-	{
-	//	BVHNode* node = new BVHNode();
-		// Special case check
-		if (inputTriangles.empty()) return;
-		
-		// make bound box covers all triangle. (initialise the boundary box)
-		for (Triangle i : inputTriangles) {
-			bounds.extend(i.vertices[0].p);
-			bounds.extend(i.vertices[1].p);
-			bounds.extend(i.vertices[2].p);
+		bounds.reset();
+		for (int i : indices)
+		{
+			bounds.extend(triangles[i].vertices[0].p);
+			bounds.extend(triangles[i].vertices[1].p);
+			bounds.extend(triangles[i].vertices[2].p);
 		}
 
-		// Set stop condition
-		const int MAX_TRIANGLE = 3;
-		if (inputTriangles.size() <= MAX_TRIANGLE) {
+		if (indices.size() <= MAXNODE_TRIANGLES)
+		{
+			triangleIndices = indices;
 			return;
 		}
-		// Always choose max axis so we are always dealing with maximum boundary box
-		// Calculate max axis via diagonal
-		// TODO SOME ERRORS HERE
-		Vec3 diag = bounds.max - bounds.min;
-		int axis = 0; // choose x axis by default
-		if (diag.x < diag.y) {
-			axis = 1;
-		}
-		if (diag[axis] < diag.z) {
-			axis = 2;
-		}
 
-		// Split triangles by median
+		// 选择分割轴
+		Vec3 size = bounds.max - bounds.min;
+		int axis = size.longestAxis(); // 最长轴
 
-		// Prepare comparator for nth_element
-		auto comparator = [axis](const Triangle& a, const Triangle& b) {
-			return a.centre()[axis] < b.centre()[axis]; // used for nth_element
-		};
-		// Find median, we use size_t to make sure support for very large number
-		size_t mid = inputTriangles.size() / 2;  // split index, so if mid = 3, it means 0-1-2-3, which is fourth element
+		// 按中心点排序
+		std::vector<int> sorted = indices;
+		std::sort(sorted.begin(), sorted.end(), [&](int a, int b) {
+			return triangles[a].centre()[axis] < triangles[b].centre()[axis];
+			});
 
-		// Split vector into 2 parts
-		std::nth_element(inputTriangles.begin(), inputTriangles.begin()+mid, inputTriangles.end(),comparator); // make sure the mid position is correct
-		
-		
-		
-		// nth_element only ensure the correct position of median
-		// After this step, the vector will be split to 2 parts
-		// save l/r result into separate vectors
-		std::vector<Triangle> leftTris(inputTriangles.begin(), inputTriangles.begin() + mid);
-		std::vector<Triangle> rightTris(inputTriangles.begin() + mid, inputTriangles.end());
-		
-		// recursive left/ right
+		int mid = sorted.size() / 2;
+		std::vector<int> left(sorted.begin(), sorted.begin() + mid);
+		std::vector<int> right(sorted.begin() + mid, sorted.end());
+
 		l = new BVHNode();
-		l->build(leftTris);
 		r = new BVHNode();
-		r->build(rightTris);
-
+		l->build(triangles, left);
+		r->build(triangles, right);
 	}
+
 	void traverse(const Ray& ray, const std::vector<Triangle>& triangles, IntersectionData& intersection)
 	{
-		// Check if ray collides with boundary box at current level
-		if (!bounds.rayAABB(ray)) return;
-		// when in leaf node
-		if (!r && !l) {
-			float t, u, v;
-			for (const Triangle& tri : triangles) {
-				if (tri.rayIntersect(ray, t, u, v)) {
-					if (t > EPSILON && t < intersection.t) {
-						intersection.t = t;
-						intersection.ID = &tri - &triangles[0];
-						intersection.alpha = 1 - u - v;
-						intersection.beta = u;
-						intersection.gamma = v;
-					}
+		float t;
+		if (!bounds.rayAABB(ray, t)) return;
+
+		if (l == nullptr && r == nullptr)
+		{
+			for (int idx : triangleIndices)
+			{
+				float tt, u, v;
+				if (triangles[idx].rayIntersect(ray, tt, u, v) && tt < intersection.t)
+				{
+					intersection.t = tt;
+					intersection.alpha = u;
+					intersection.beta = v;
+					intersection.gamma = 1.0f - (u + v);
+					intersection.ID = idx;  // 设置为原始三角形的索引
 				}
 			}
+			return;
 		}
 
-		//  traverse closer nodes
-		float tLeft = (l) ? (l->bounds.rayAABB(ray) ? 0 : FLT_MAX) : FLT_MAX; // check if left subnode is available. and then give value based on its intersection status
-		float tRight = (r) ? r->bounds.rayAABB(ray) ? 0 : FLT_MAX : FLT_MAX;
-
-		
-		if (tLeft < tRight) {
-			if (l) l->traverse(ray, triangles, intersection);
-			if (r) r->traverse(ray, triangles, intersection);
-		}
-		else {
-			if (r) r->traverse(ray, triangles, intersection);
-			if (l) l->traverse(ray, triangles, intersection);
-		}
-
+		if (l) l->traverse(ray, triangles, intersection);
+		if (r) r->traverse(ray, triangles, intersection);
 	}
-
 
 	IntersectionData traverse(const Ray& ray, const std::vector<Triangle>& triangles)
 	{
@@ -429,9 +378,25 @@ public:
 		traverse(ray, triangles, intersection);
 		return intersection;
 	}
-	bool traverseVisible(const Ray& ray, const std::vector<Triangle>& triangles, const float maxT)
+
+	bool traverseVisible(const Ray& ray, const std::vector<Triangle>& triangles, float maxT)
 	{
-		// Add visibility code here
+		float t;
+		if (!bounds.rayAABB(ray, t) || t > maxT) return true;
+
+		if (l == nullptr && r == nullptr)
+		{
+			for (int idx : triangleIndices)
+			{
+				float tt, u, v;
+				if (triangles[idx].rayIntersect(ray, tt, u, v) && tt < maxT)
+					return false;
+			}
+			return true;
+		}
+
+		if (l && !l->traverseVisible(ray, triangles, maxT)) return false;
+		if (r && !r->traverseVisible(ray, triangles, maxT)) return false;
 		return true;
 	}
 };

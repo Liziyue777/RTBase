@@ -155,6 +155,12 @@ public:
 		z *= scalar;
 		return *this;
 	}
+	//for bvh
+	int longestAxis() const {
+	if (x > y && x > z) return 0;
+	if (y > z) return 1;
+	return 2;
+}
 	Vec3& operator+=(const Vec3& other)
 	{
 		x += other.x;
@@ -162,6 +168,7 @@ public:
 		z += other.z;
 		return *this;
 	}
+
 
 	Vec3 perspectiveDivide() const
 	{

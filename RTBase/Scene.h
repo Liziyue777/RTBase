@@ -6,6 +6,7 @@
 #include "Imaging.h"
 #include "Materials.h"
 #include "Lights.h"
+#include <numeric>
 
 class Camera
 {
@@ -83,8 +84,11 @@ public:
 	void build()
 	{
 		// Add BVH building code here (done)
-		//bvh = new BVHNode();
-		//bvh->build(triangles);
+		
+		bvh = new BVHNode();
+		std::vector<int> triangleIndices(triangles.size());
+		std::iota(triangleIndices.begin(), triangleIndices.end(), 0); // 0 到 N-1
+		bvh->build(triangles, triangleIndices);
 		// Do not touch the code below this line!
 		// Build light list
 		for (int i = 0; i < triangles.size(); i++)
@@ -100,7 +104,7 @@ public:
 	}
 	IntersectionData traverse(const Ray& ray)
 	{
-		IntersectionData intersection;
+/*		IntersectionData intersection;
 		intersection.t = FLT_MAX;
 		for (int i = 0; i < triangles.size(); i++)
 		{
@@ -120,8 +124,8 @@ public:
 			}
 		}
 		return intersection;
-
-		//return bvh->traverse(ray, triangles);
+*/
+		return bvh->traverse(ray, triangles);
 	}
 
 	Light* sampleLight(Sampler* sampler, float& pmf)
@@ -161,23 +165,26 @@ public:
 		dir = dir.normalize();
 		ray.init(p1 + (dir * EPSILON), dir);
 
-		//return bvh->traverseVisible(ray, triangles, maxT);
-		
-		// no bvh
-		for (int i = 0; i < triangles.size(); i++)
+		if (bvh != nullptr) // BVH has been applied.
 		{
-			float t;
-			float u;
-			float v;
-			if (triangles[i].rayIntersect(ray, t, u, v))
+			return bvh->traverseVisible(ray, triangles, maxT);
+		}
+		else
+		{
+			// no bvh:(not used)
+			for (int i = 0; i < triangles.size(); i++)
 			{
-				if (t < maxT)
+				float t, u, v;
+				if (triangles[i].rayIntersect(ray, t, u, v))
 				{
-					return false;
+					if (t < maxT)
+					{
+						return false;
+					}
 				}
 			}
+			return true;
 		}
-		return true;
 	}
 
 	Colour emit(Triangle* light, ShadingData shadingData, Vec3 wi)
