@@ -10,7 +10,7 @@
 #include "GamesEngineeringBase.h"
 #include <thread>
 #include <functional>
-
+#include <OpenImageDenoise/oidn.hpp> 
 
 class RayTracer
 {
@@ -21,6 +21,12 @@ public:
 	MTRandom *samplers;
 	std::thread **threads;
 	int numProcs;
+
+	//Image storage(temporary) for OIDN
+	std::vector<float> colorBuffer;
+	std::vector<float> albedoBuffer;
+	std::vector<float> normalBuffer;
+
 	void init(Scene* _scene, GamesEngineeringBase::Window* _canvas)
 	{
 		scene = _scene;
@@ -32,6 +38,9 @@ public:
 		numProcs = sysInfo.dwNumberOfProcessors;
 		threads = new std::thread*[numProcs];
 		samplers = new MTRandom[numProcs];
+		colorBuffer.resize(film->width * film->height * 3);
+		albedoBuffer.resize(film->width * film->height * 3);
+		normalBuffer.resize(film->width * film->height * 3);
 		clear();
 	}
 	void clear()
@@ -213,7 +222,7 @@ public:
 		auto worker = [&](int threadID) {
 			Sampler* sampler = &samplers[threadID];
 			while (true) {
-				int tileIndex = tileCounter.fetch_add(1); 
+				int tileIndex = tileCounter.fetch_add(1);
 				if (tileIndex >= totalTiles) break;
 
 				int tileX = tileIndex % tilesX;
@@ -251,11 +260,28 @@ public:
 						Colour col = pathTrace(ray, Colour(1.f, 1.f, 1.f), 13, sampler);
 
 						film->splat(px, py, col);
+						// renderer Albedo and Normal
+						Colour alb = albedo(ray);
+						Colour nrm = viewNormals(ray);
+
+						// To the AOV buffer
+						int index = (y * film->width + x) * 3;
+						colorBuffer[index + 0] = col.r;
+						colorBuffer[index + 1] = col.g;
+						colorBuffer[index + 2] = col.b;
+
+						albedoBuffer[index + 0] = alb.r;
+						albedoBuffer[index + 1] = alb.g;
+						albedoBuffer[index + 2] = alb.b;
+
+						normalBuffer[index + 0] = nrm.r;
+						normalBuffer[index + 1] = nrm.g;
+						normalBuffer[index + 2] = nrm.b;
 
 						unsigned char r = (unsigned char)(col.r * 255);
 						unsigned char g = (unsigned char)(col.g * 255);
 						unsigned char b = (unsigned char)(col.b * 255);
-						film->tonemap(x, y, r, g, b);// very improtant!! translate HDR to LDR
+						film->tonemap(x, y, r, g, b);// very improtant!! translate HDR to LDR 
 						canvas->draw(x, y, r, g, b);
 					}
 				}
@@ -270,7 +296,53 @@ public:
 
 		// wait all threads over
 		for (auto& t : threadPool) {
+
 			t.join();
+		}
+
+		// call OIDN (below from PPT)
+		oidn::DeviceRef device = oidn::newDevice(); // The CPU can not be found although l add OIDN path to VS and download API runtime in my cp.
+		device.commit();
+
+		oidn::FilterRef filter = device.newFilter("RT");
+		filter.setImage("color", colorBuffer.data(), oidn::Format::Float3, film->width, film->height);
+		filter.setImage("albedo", albedoBuffer.data(), oidn::Format::Float3, film->width, film->height);
+		filter.setImage("normal", normalBuffer.data(), oidn::Format::Float3, film->width, film->height);
+		std::vector<float> output(film->width * film->height * 3);
+		filter.setImage("output", output.data(), oidn::Format::Float3, film->width, film->height);
+		filter.set("hdr", true);
+		filter.commit();
+		filter.execute();
+
+		// Here I've added a judgment that if the configured environment is OK (CPU can be found) then noise reduction will be applied
+		bool oidnSuccess = false;
+		const char* errorMessage;
+		auto err = device.getError(errorMessage);
+		if (err == oidn::Error::None)
+		{
+			std::cout << "OIDN used successfully" << std::endl; //show if the OIDN apply
+			oidnSuccess = true;
+		}
+		else
+		{
+			//Here will fallback to original non-denoised rendering
+		}
+
+
+		if (oidnSuccess)
+		{   // The denoised image will cover the rendered result
+			for (int y = 0; y < film->height; ++y)
+			{
+				for (int x = 0; x < film->width; ++x)
+				{
+					int index = (y * film->width + x) * 3;
+					unsigned char r = (unsigned char)(((output[index + 0] < 1.0f) ? output[index + 0] : 1.0f) * 255.0f);
+					unsigned char g = (unsigned char)(((output[index + 1] < 1.0f) ? output[index + 1] : 1.0f) * 255.0f);
+					unsigned char b = (unsigned char)(((output[index + 2] < 1.0f) ? output[index + 2] : 1.0f) * 255.0f);
+
+					canvas->draw(x, y, r, g, b);
+				}
+			}
 		}
 	}
 
