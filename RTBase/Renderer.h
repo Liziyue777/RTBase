@@ -41,50 +41,69 @@ public:
 
 	Colour computeDirect(ShadingData shadingData, Sampler* sampler)
 	{
-		if (shadingData.bsdf->isPureSpecular() == true)
-		{
+		if (shadingData.bsdf->isPureSpecular())
 			return Colour(0.0f, 0.0f, 0.0f);
-		}
-		// Sample a light
-		float pmf;
-		Light* light = scene->sampleLight(sampler, pmf);
-		// Sample a point on the light
-		float pdf;
+
+		Colour Ld(0.0f, 0.0f, 0.0f);
+
+		// --- 1. Light Sampling ---
+		float lightPmf;
+		Light* light = scene->sampleLight(sampler, lightPmf);
+		float lightPdf;
 		Colour emitted;
-		Vec3 p = light->sample(shadingData, sampler, emitted, pdf);
+		Vec3 sample = light->sample(shadingData, sampler, emitted, lightPdf);
+
+		Vec3 wi;
+		float GTerm = 1.0f;
+
 		if (light->isArea())
 		{
-			// Calculate GTerm
-			Vec3 wi = p - shadingData.x;
-			float l = wi.lengthSq();
-			wi = wi.normalize();
-			float GTerm = (max(Dot(wi, shadingData.sNormal), 0.0f) * max(-Dot(wi, light->normal(shadingData, wi)), 0.0f)) / l;
-			if (GTerm > 0)
-			{
-				// Trace
-				if (scene->visible(shadingData.x, p))
-				{
-					// Shade
-					return shadingData.bsdf->evaluate(shadingData, wi) * emitted * GTerm / (pmf * pdf);
-				}
-			}
+			wi = (sample - shadingData.x).normalize();
+			float lenSq = (sample - shadingData.x).lengthSq();
+			float cosThetaSurface = max(0.0f, Dot(wi, shadingData.sNormal));
+			float cosThetaLight = max(0.0f, -Dot(wi, light->normal(shadingData, wi)));
+			GTerm = (cosThetaSurface * cosThetaLight) / (lenSq + EPSILON);
 		}
 		else
 		{
-			// Calculate GTerm
-			Vec3 wi = p;
-			float GTerm = max(Dot(wi, shadingData.sNormal), 0.0f);
-			if (GTerm > 0)
+			wi = sample; // already a direction
+			GTerm = max(0.0f, Dot(shadingData.sNormal, wi));
+		}
+
+		if (GTerm > 0 && scene->visible(shadingData.x, light->isArea() ? sample : shadingData.x + wi * 1e4f))
+		{
+			Colour f = shadingData.bsdf->evaluate(shadingData, wi);
+			float bsdfPdf = shadingData.bsdf->PDF(shadingData, wi);
+			float weight = (lightPdf * lightPdf) / (lightPdf * lightPdf + bsdfPdf * bsdfPdf + EPSILON);
+			Ld = Ld + f * emitted * GTerm * weight / (lightPdf * lightPmf + EPSILON);
+		}
+
+		// --- 2. BSDF Sampling ---
+		float bsdfPdf;
+		Colour fBSDF;
+		Vec3 bsdfDir = shadingData.bsdf->sample(shadingData, sampler, fBSDF, bsdfPdf);
+
+		if (fBSDF.Lum() > 0.0f && bsdfPdf > 0.0f)
+		{
+			Vec3 rayTarget = shadingData.x + bsdfDir * 1e4f;
+			if (scene->visible(shadingData.x, rayTarget))
 			{
-				// Trace
-				if (scene->visible(shadingData.x, shadingData.x + (p * 10000.0f)))
+				for (Light* l : scene->lights)
 				{
-					// Shade
-					return shadingData.bsdf->evaluate(shadingData, wi) * emitted * GTerm / (pmf * pdf);
+					Colour Le = l->evaluate(shadingData, bsdfDir);
+					if (Le.Lum() > 0.0f)
+					{
+						float lightPdf2 = l->PDF(shadingData, bsdfDir);
+						float cosTheta = max(0.0f, Dot(shadingData.sNormal, bsdfDir));
+						float weight = (bsdfPdf * bsdfPdf) / (bsdfPdf * bsdfPdf + lightPdf2 * lightPdf2 + EPSILON);
+						Ld = Ld + fBSDF * Le * cosTheta * weight / (bsdfPdf + EPSILON);
+						break; // 命中一个光源就停止（防止重复）
+					}
 				}
 			}
 		}
-		return Colour(0.0f, 0.0f, 0.0f);
+
+		return Ld;
 	}
 
 	Colour pathTrace(Ray& r, Colour pathThroughput, int depth, Sampler* sampler, bool canHitLight = true)
@@ -120,6 +139,7 @@ public:
 			}
 			
 			Colour bsdf;
+
 			//  Replace cosine sampling in renderer
 			Colour indirect;
 			float pdf;
