@@ -33,22 +33,22 @@ public:
 	{
 		
 		float p = 2.0f * M_PI * r2;
-		float t = acos(r1);
-		float PDF = 1 / (4*M_PI);
-		float CDFtheta = (1 - cos(t))/2;
-		float CDFphi = p / (2 * M_PI);
+		float t = acos(1.0f-r1);
 		return SphericalCoordinates::sphericalToWorld(t, p);
 
 	}
 	static float uniformHemispherePDF(const Vec3 wi)
 	{
-		return 1/(2*M_PI);
+		return 1.0f/(2.0f*M_PI);
 	}
 	static Vec3 cosineSampleHemisphere(float r1, float r2)
 	{
-		float t = acosf(sqrtf(r1));
-		float p = 2.0f * M_PI * r2;
-		return Vec3(0, 0, 1);
+		float r = sqrtf(r1);
+		float t = 2.0f * M_PI * r2;
+		float x = r * cosf(t);
+		float y = r * sinf(t);
+		float z = sqrtf(1.0f - x * x - y * y);
+		return Vec3(x, y, z);
 	}
 
 	static float cosineHemispherePDF(const Vec3 wi,float r1)
@@ -64,12 +64,12 @@ public:
 	static Vec3 uniformSampleSphere(float r1, float r2)
 	{
 		float p = 2.0f * M_PI * r2;
-		float t = acos(1 - 2 * r1);
+		float t = acos(1.0f - 2.0f * r1);
 		return SphericalCoordinates::sphericalToWorld(t,p);
 	}
 
 	static float uniformSpherePDF(const Vec3& wi)
 	{
-		return 1/(4*M_PI);
+		return 1.0f/(4.0f*M_PI);
 	}
 };
