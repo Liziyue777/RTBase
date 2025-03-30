@@ -10,7 +10,16 @@
 #include "GamesEngineeringBase.h"
 #include <thread>
 #include <functional>
+
 #include <OpenImageDenoise/oidn.hpp> 
+
+
+// Used in the Instant Radiosity algorithm to simulate lighting.
+struct VirtualPointLight {
+	Vec3 position;
+	Vec3 normal; //calculate G
+	Colour power; //radiant power
+};
 
 class RayTracer
 {
@@ -26,6 +35,8 @@ public:
 	std::vector<float> colorBuffer;
 	std::vector<float> albedoBuffer;
 	std::vector<float> normalBuffer;
+
+	std::vector<VirtualPointLight> vplList; //store all VPL
 
 	void init(Scene* _scene, GamesEngineeringBase::Window* _canvas)
 	{
@@ -48,6 +59,44 @@ public:
 		film->clear();
 	}
 
+	void buildVPLs(int numVPLs = 1000)//here shoot 1000 path to create VPL
+	{   
+		vplList.clear(); // clear VPL list before to create new
+		
+		//Each path simulates a ray of light from a light source
+		for (int i = 0; i < numVPLs; ++i)
+		{
+			Sampler* sampler = &samplers[i % numProcs]; // for multiple threads 
+			float lightPmf;
+			Light* light = scene->sampleLight(sampler, lightPmf); // get the light for scene
+			
+			// Sample emission point/emission direction
+			float pdfPos, pdfDir;
+			Vec3 lightPos = light->samplePositionFromLight(sampler, pdfPos);
+			Vec3 lightDir = light->sampleDirectionFromLight(sampler, pdfDir);
+			
+			// get the real light from sample in light.h
+			Colour emitted;
+			float dummyPdf;
+			light->sample(ShadingData(), sampler, emitted, dummyPdf);
+
+			Ray r(lightPos, lightDir);// shoot 
+			IntersectionData isect = scene->traverse(r);
+			if (isect.t < FLT_MAX)
+			{
+				ShadingData shadingData = scene->calculateShadingData(isect, r);
+				if (!shadingData.bsdf->isPureSpecular()) // If the surface is mirrored, no VPL 
+				{
+					Colour f = shadingData.bsdf->evaluate(shadingData, -lightDir);
+					float bsdfPdf = shadingData.bsdf->PDF(shadingData, -lightDir);
+					Colour power = emitted * f / (pdfPos * pdfDir + EPSILON);  //Calculate the power of the VPL.
+
+					vplList.push_back({ shadingData.x, shadingData.sNormal, power }); // store light
+				}
+			}
+		}
+	}
+
 	Colour computeDirect(ShadingData shadingData, Sampler* sampler)
 	{
 		if (shadingData.bsdf->isPureSpecular())
@@ -55,7 +104,7 @@ public:
 
 		Colour Ld(0.0f, 0.0f, 0.0f);
 
-		// --- 1. Light Sampling ---
+		// Light Sampling
 		float lightPmf;
 		Light* light = scene->sampleLight(sampler, lightPmf);
 		float lightPdf;
@@ -87,7 +136,7 @@ public:
 			Ld = Ld + f * emitted * GTerm * weight / (lightPdf * lightPmf + EPSILON);
 		}
 
-		// --- 2. BSDF Sampling ---
+		// BSDF Sampling
 		float bsdfPdf;
 		Colour fBSDF;
 		Vec3 bsdfDir = shadingData.bsdf->sample(shadingData, sampler, fBSDF, bsdfPdf);
@@ -106,13 +155,32 @@ public:
 						float cosTheta = max(0.0f, Dot(shadingData.sNormal, bsdfDir));
 						float weight = (bsdfPdf * bsdfPdf) / (bsdfPdf * bsdfPdf + lightPdf2 * lightPdf2 + EPSILON);
 						Ld = Ld + fBSDF * Le * cosTheta * weight / (bsdfPdf + EPSILON);
-						break; // 命中一个光源就停止（防止重复）
+						break; // break when it reach a light
 					}
 				}
 			}
 		}
 
 		return Ld;
+	}
+
+	//This function is build to calculate the total indirect lighting received at the shading point from all VPL.
+	Colour computeVPL(const ShadingData& shadingData)
+	{
+		Colour indirect(0.0f, 0.0f, 0.0f);
+		for (const VirtualPointLight& vpl : vplList)
+		{
+			Vec3 wi = (vpl.position - shadingData.x).normalize();
+			
+			//Calculate variables
+			float lenSq = (vpl.position - shadingData.x).lengthSq();
+			float G = max(0.0f, Dot(shadingData.sNormal, wi)) *max(0.0f, Dot(vpl.normal, -wi)) /(lenSq + EPSILON);
+			Colour f = shadingData.bsdf->evaluate(shadingData, wi);
+			
+			//power × BSDF × GTerm
+			indirect = indirect + f * vpl.power * G;
+		}
+		return indirect;
 	}
 
 	Colour pathTrace(Ray& r, Colour pathThroughput, int depth, Sampler* sampler, bool canHitLight = true)
@@ -166,6 +234,7 @@ public:
 		}
 		return scene->background->evaluate(shadingData, r.dir);
 	}
+
 	Colour direct(Ray& r, Sampler* sampler)
 	{
 		IntersectionData intersection = scene->traverse(r);
@@ -176,7 +245,10 @@ public:
 			{
 				return shadingData.bsdf->emit(shadingData, shadingData.wo);
 			}
-			return computeDirect(shadingData, sampler);
+			//Combine two methods
+			Colour Ld = computeDirect(shadingData, sampler);
+			Colour Li = computeVPL(shadingData);
+			return Ld + Li;
 		}
 		return Colour(0.0f, 0.0f, 0.0f);
 	}
@@ -192,7 +264,6 @@ public:
 				return shadingData.bsdf->emit(shadingData, shadingData.wo);
 			}
 			return shadingData.bsdf->evaluate(shadingData, Vec3(0, 1, 0));
-			//return computeDirect(shadingData, samplers);
 		}
 		return scene->background->evaluate(shadingData, r.dir);
 	}
@@ -257,8 +328,10 @@ public:
 						float py = y + 0.5f;
 						Ray ray = scene->camera.generateRay(px, py);
 
-						Colour col = pathTrace(ray, Colour(1.f, 1.f, 1.f), 13, sampler);
-
+						//Colour col = pathTrace(ray, Colour(1.f, 1.f, 1.f), 13, sampler);
+						Colour col = direct(ray, sampler);
+						
+						
 						film->splat(px, py, col);
 						// renderer Albedo and Normal
 						Colour alb = albedo(ray);
