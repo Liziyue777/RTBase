@@ -11,7 +11,7 @@
 #include <thread>
 #include <functional>
 
-#include <OpenImageDenoise/oidn.hpp> 
+#include <OpenImageDenoise/oidn.hpp> // OIDN
 
 
 // Used in the Instant Radiosity algorithm to simulate lighting.
@@ -37,7 +37,8 @@ public:
 	std::vector<float> normalBuffer;
 
 	std::vector<VirtualPointLight> vplList; //store all VPL
-
+	std::vector<Colour> lightTrace; // Accumulated color of each pixel light tracing.
+	
 	void init(Scene* _scene, GamesEngineeringBase::Window* _canvas)
 	{
 		scene = _scene;
@@ -54,12 +55,8 @@ public:
 		normalBuffer.resize(film->width * film->height * 3);
 		clear();
 	}
-	void clear()
-	{
-		film->clear();
-	}
 
-	void buildVPLs(int numVPLs = 1000)//here shoot 1000 path to create VPL
+	void VPL(int numVPLs = 1000)//here shoot 1000 path to create VPL
 	{   
 		vplList.clear(); // clear VPL list before to create new
 		
@@ -97,6 +94,71 @@ public:
 		}
 	}
 
+	// Light Tracing 
+	void LightTrace(int numSamples = 77777)
+	{
+		//init
+		lightTrace.clear();
+		lightTrace.resize(film->width * film->height, Colour(0, 0, 0));
+		//multipul threads
+		std::atomic<int> counter(0);
+		auto worker = [&](int threadID) {
+			Sampler* sampler = &samplers[threadID];
+			while (true)
+			{
+				int idx = counter.fetch_add(1);
+				if (idx >= numSamples) break;
+
+				//below are same as VPL
+				float lightPmf;
+				Light* light = scene->sampleLight(sampler, lightPmf);
+				float pdfPos, pdfDir;
+				Vec3 lightPos = light->samplePositionFromLight(sampler, pdfPos);
+				Vec3 lightDir = light->sampleDirectionFromLight(sampler, pdfDir);
+
+				Colour emitted;
+				float dummyPdf;
+				light->sample(ShadingData(), sampler, emitted, dummyPdf);
+
+				Ray r(lightPos, lightDir);
+				IntersectionData isect = scene->traverse(r);
+				if (isect.t >= FLT_MAX) continue;
+
+				ShadingData shadingData = scene->calculateShadingData(isect, r);
+				
+				//new for LightTrace
+				//N · ω > 0 calculate face the camera or not
+				Vec3 toCamera = (scene->camera.origin - shadingData.x).normalize();
+				float cosToCam = Dot(shadingData.sNormal, toCamera);
+				if (cosToCam <= 0.0f) continue;
+				
+				//Get the pixel position
+				float px, py;
+				if (!scene->camera.projectOntoCamera(shadingData.x, px, py)) continue;
+				int x = (int)px;
+				int y = (int)py;
+				if (x < 0 || x >= film->width || y < 0 || y >= film->height) continue;//Determines whether the pixel position falls on the screen
+
+				Colour f = shadingData.bsdf->evaluate(shadingData, toCamera);//BSDF
+				Colour contrib = emitted * f * cosToCam / (pdfPos * pdfDir + EPSILON);//Lighting contributions
+
+				int index = y * film->width + x;
+				lightTrace[index] = lightTrace[index] + contrib;
+			}
+			};
+
+		std::vector<std::thread> threadPool;
+		for (int i = 0; i < numProcs; ++i)
+		{
+			threadPool.emplace_back(worker, i);
+		}
+		for (auto& t : threadPool) t.join();
+	}
+	
+	void clear()
+	{
+		film->clear();
+	}
 	Colour computeDirect(ShadingData shadingData, Sampler* sampler)
 	{
 		if (shadingData.bsdf->isPureSpecular())
@@ -124,7 +186,7 @@ public:
 		}
 		else
 		{
-			wi = sample; // already a direction
+			wi = sample; // already a direction ?
 			GTerm = max(0.0f, Dot(shadingData.sNormal, wi));
 		}
 
@@ -253,6 +315,16 @@ public:
 		return Colour(0.0f, 0.0f, 0.0f);
 	}
 
+	// Provide the indirect lighting values used for each pixel in Light Tracing.
+	Colour computeLT(int x, int y)
+	{
+		int index = y * film->width + x;
+		if (index >= 0 && index < lightTrace.size())
+			return lightTrace[index];
+		else
+			return Colour(0, 0, 0);
+	}
+
 	Colour albedo(Ray& r)
 	{
 		IntersectionData intersection = scene->traverse(r);
@@ -281,6 +353,7 @@ public:
 	//multiple threads and Tile based rendering
 	void render() {
 		film->incrementSPP();
+		LightTrace(); //create light trace
 
 		const int tileSize = 32;  // Tile 32X32
 		const int tilesX = (film->width + tileSize - 1) / tileSize;// render num for X
@@ -328,9 +401,13 @@ public:
 						float py = y + 0.5f;
 						Ray ray = scene->camera.generateRay(px, py);
 
-						//Colour col = pathTrace(ray, Colour(1.f, 1.f, 1.f), 13, sampler);
-						Colour col = direct(ray, sampler);
 						
+						//———————Here to Chose Light implementation—————————————
+
+						//Colour col = pathTrace(ray, Colour(1.f, 1.f, 1.f), 0, sampler); //provide implement code
+						Colour col = direct(ray, sampler); //instant radiosity 
+						//Colour col = computeLT(x, y);//Light tracing 
+						//Colour col = direct(ray, sampler) + computeLT(x, y);
 						
 						film->splat(px, py, col);
 						// renderer Albedo and Normal
