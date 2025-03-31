@@ -1,6 +1,4 @@
-﻿
-
-#include "GEMLoader.h"
+﻿#include "GEMLoader.h"
 #include "Renderer.h"
 #include "SceneLoader.h"
 #define NOMINMAX
@@ -66,12 +64,9 @@ int main(int argc, char *argv[])
 	RayTracer rt;
 	rt.init(scene, &canvas);
 
-	//std::cout << "[Debug] Background light power: " << scene->background->totalIntegratedPower() << std::endl;
-	//std::cout << "[Debug] Light count in scene: " << scene->lights.size() << std::endl;
-	//for (int i = 0; i < scene->lights.size(); ++i) {
-	//	std::cout << "  Light[" << i << "] isArea: " << scene->lights[i]->isArea()
-	//		<< ", total power: " << scene->lights[i]->totalIntegratedPower() << std::endl;
-	//}
+	//std::cout << "Background light power: " << scene->background->totalIntegratedPower() << std::endl;
+	//std::cout << "Light count in scene: " << scene->lights.size() << std::endl;
+	
 
 	bool running = true;
 	GamesEngineeringBase::Timer timer;

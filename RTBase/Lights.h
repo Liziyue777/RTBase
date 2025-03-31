@@ -209,7 +209,7 @@ public:
 	}
 	Vec3 sample(const ShadingData& shadingData, Sampler* sampler, Colour& reflectedColour, float& pdf)
 	{
-		// Assignment: Update this code to importance sampling lighting based on luminance of each pixel
+		// Assignment: Update this code to importance sampling lighting based on luminance of each pixel (done)
 		
 		Vec3 wi = sampleDirectionFromLight(sampler, pdf); // Luminance-weighted importance sampling (implement see below)
 		reflectedColour = evaluate(shadingData, wi);
@@ -233,10 +233,13 @@ public:
 	}
 	float PDF(const ShadingData& shadingData, const Vec3& wi)
 	{
-		// Assignment: Update this code to return the correct PDF of luminance weighted importance sampling
+		// Assignment: Update this code to return the correct PDF of luminance weighted importance sampling (done)
 		// 
 		float u = atan2f(wi.z, wi.x);
-		u = (u < 0.0f) ? u + 2.0f * M_PI : u;
+		if (u < 0.0f)
+		{
+			u = u + 2.0f * M_PI;
+		}
 		u /= 2.0f * M_PI;
 		float v = acosf(wi.y) / M_PI;
 
