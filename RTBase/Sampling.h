@@ -29,24 +29,47 @@ public:
 class SamplingDistributions
 {
 public:
+	static Vec3 uniformSampleHemisphere(float r1, float r2)
+	{
+		
+		float p = 2.0f * M_PI * r2;
+		float t = acos(1.0f-r1);
+		return SphericalCoordinates::sphericalToWorld(t, p);
+
+	}
+	static float uniformHemispherePDF(const Vec3 wi)
+	{
+		return 1.0f/(2.0f*M_PI);
+	}
 	static Vec3 cosineSampleHemisphere(float r1, float r2)
 	{
-		// Add code here
-		return Vec3(0, 0, 1);
+		float r = sqrtf(r1);
+		float t = 2.0f * M_PI * r2;
+		float x = r * cosf(t);
+		float y = r * sinf(t);
+		float z = sqrtf(1.0f - x * x - y * y);
+		return Vec3(x, y, z);
+	}
+
+	static float cosineHemispherePDF(const Vec3 wi,float r1)
+	{
+		float t = acosf(sqrtf(r1));
+		return cosf(t)/M_PI;
 	}
 	static float cosineHemispherePDF(const Vec3 wi)
 	{
-		// Add code here
-		return 1.0f;
+		return wi.z / M_PI;
 	}
+
 	static Vec3 uniformSampleSphere(float r1, float r2)
 	{
-		// Add code here
-		return Vec3(0, 0, 1);
+		float p = 2.0f * M_PI * r2;
+		float t = acos(1.0f - 2.0f * r1);
+		return SphericalCoordinates::sphericalToWorld(t,p);
 	}
+
 	static float uniformSpherePDF(const Vec3& wi)
 	{
-		// Add code here
-		return 1.0f;
+		return 1.0f/(4.0f*M_PI);
 	}
 };
